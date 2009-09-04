@@ -96,12 +96,26 @@ typedef struct {
 
 
 int main() {
+	int ret = -1;
+	char path[128] = "acss_st_profile.bin";
+	struct stat buf;
 
-	u_int32_t total_size = sizeof(T_ACSS_ST_PROFILE_FILE_ELT) * NB_ST;
-	printf("struct size= %d bytes\n",  sizeof(T_ACSS_ST_PROFILE_FILE_ELT));
-	printf("total_size= %d bytes\n", total_size);
+	/* stats */
+	ret = stat(path, &buf);
+	if (ret == -1) {
+		printf("stat() %s", strerror(errno));
+		return EXIT_FAILURE;
+	}
 
-	int fd = open("acss_st_profile.bin", O_RDONLY);
+	int file_size = (int) buf.st_size;
+	int total_size = sizeof(T_ACSS_ST_PROFILE_FILE_ELT) * NB_ST;
+	if (file_size != total_size) {
+		printf("incorrect file size: %d != %d (%d x %d)\n", file_size, total_size, sizeof(T_ACSS_ST_PROFILE_FILE_ELT), NB_ST);
+		return EXIT_FAILURE;
+	}
+
+
+	int fd = open(path, O_RDONLY);
 	if (fd == -1) {
 		printf("%s", strerror(errno));
 		return EXIT_FAILURE;
