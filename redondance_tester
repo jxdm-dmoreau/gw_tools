@@ -1,0 +1,188 @@
+#!/bin/bash
+
+ACME11_PATH_A=10.0.1.111
+ACME11_PATH_B=10.0.65.111
+ACME12_PATH_A=10.0.1.112
+ACME12_PATH_B=10.0.65.112
+ACME21_PATH_A=10.0.1.121
+ACME21_PATH_B=10.0.65.121
+ACME22_PATH_A=10.0.1.122
+ACME22_PATH_B=10.0.65.122
+ACME_ITF_A="eth2"
+ACME_ITF_B="eth1"
+
+PEP11_PATH_A=10.0.1.115
+PEP11_PATH_B=10.0.65.115
+PEP12_PATH_A=10.0.1.116
+PEP12_PATH_B=10.0.65.116
+PEP21_PATH_A=10.0.1.125
+PEP21_PATH_B=10.0.65.125
+PEP22_PATH_A=10.0.1.126
+PEP22_PATH_B=10.0.65.126
+PEP_ITF_A="eth0"
+PEP_ITF_B="eth1"
+
+ETHMUX1_PATH_A=10.0.1.31
+ETHMUX1_PATH_B=10.0.65.31
+ETHMUX2_PATH_A=10.0.1.32
+ETHMUX2_PATH_B=10.0.65.32
+ETHMUX_ITF_A="eth0"
+ETHMUX_ITF_B="eth1"
+
+
+RLC1_PATH_A=10.0.1.11
+RLC1_PATH_B=10.0.65.11
+RLC2_PATH_A=10.0.1.12
+RLC2_PATH_B=10.0.65.12
+RLC_ITF_A="eth0"
+RLC_ITF_B="eth1"
+
+MULTICAST_A=224.0.0.0/8
+MULTICAST_B=225.0.0.0/8
+
+rouge="\033[31m"
+vert="\033[32m"
+default="\033[00m"
+
+print_help() {
+	echo "$0 down EQPT NUMBER PATH"
+	echo "$0 up EQPT NUMBER PATH"
+	echo "$0 status EQPT NUMBER"
+	echo "$0 status all"
+}
+
+test_addr() {
+	/bin/ping -c 1 -W 1 $1 > /dev/null
+	if [ $? -eq 1 ]; then
+		echo -e " $rouge ping on $1 failed $default"
+		return 1
+	fi
+   return 0
+}
+
+test_mcast_route() {
+	ssh $1 "ip r | grep $2 | grep $3 > /dev/null"
+	if [ $? -eq 1 ]; then
+		echo -e "$rouge missing multicast route $default"
+		return 1
+	fi
+	return 0
+}
+	
+
+
+
+check_status() {
+	IP_A=$1$2"_PATH_A"
+	IP_B=$1$2"_PATH_B"
+	ITF_A=$1"_ITF_A"
+	ITF_B=$1"_ITF_B"
+	echo -n "$1$2 PATH A :"
+	test_addr ${!IP_A}
+	if [ $? -eq 0 ]; then
+		test_mcast_route ${!IP_A} $MULTICAST_A ${!ITF_A}
+		if [ $? -eq 0 ]; then 
+			echo -e "$vert OK $default"
+		fi
+	fi
+	echo -n "$1$2 PATH B :"
+	test_addr ${!IP_B}
+	if [ $? -eq 0 ]; then
+		test_mcast_route ${!IP_B} $MULTICAST_B ${!ITF_B}
+		if [ $? -eq 0 ]; then
+			echo -e "$vert OK $default"
+		fi
+	fi
+}
+
+
+set_itf_up() {
+	EQPT=$1
+	NB=$2
+	PATH=$3
+	if [ $PATH = 'A' ]; then
+		IP_TO_UP=$EQPT$NB"_PATH_A"
+		ITF_TO_UP=$EQPT"_ITF_A"
+		IP_OTHER=$EQPT$NB"_PATH_B"
+		MCAST=$MULTICAST_A
+	elif [ $PATH = 'B' ]; then
+		IP_TO_UP=$EQPT$NB"_PATH_B"
+		ITF_TO_UP=$EQPT"_ITF_B"
+		IP_OTHER=$EQPT$NB"_PATH_A"
+		MCAST=$MULTICAST_B
+	fi
+	/usr/bin/ssh ${!IP_OTHER} "ip link set ${!ITF_TO_UP} up; ip r add $MCAST dev ${!ITF_TO_UP}"
+}
+
+
+set_itf_down() {
+	EQPT=$1
+	NB=$2
+	PATH=$3
+	if [ $PATH = A ]; then
+		IP_TO_DOWN=$EQPT$NB"_PATH_A"
+		ITF_TO_DOWN=$EQPT"_ITF_A"
+		ITF_OTHER=$EQPT"_ITF_B"
+		IP_OTHER=$EQPT$NB"_PATH_B"
+
+	elif [ $PATH = B ]; then
+		IP_TO_DOWN=$EQPT$NB"_PATH_B"
+		ITF_TO_DOWN=$EQPT"_ITF_B"
+		ITF_OTHER=$EQPT"_ITF_A"
+		IP_OTHER=$EQPT$NB"_PATH_A"
+	else
+		echo "$rouge Invalid PATH $PATH $default"
+		return 1
+	fi
+	/usr/bin/ssh ${!IP_TO_DOWN} "ip link set ${!ITF_OTHER} up; ip r add 225.0.0.0/8 dev ${!ITF_OTHER}"
+	/usr/bin/ssh ${!IP_OTHER} "ip link set ${!ITF_TO_DOWN} down"
+
+}
+
+
+###############################################################################
+# MAIN
+###############################################################################
+
+if [ $1 == '--help' ]; then
+	print_help
+	exit 0
+fi
+
+if [ $1 == '-h' ]; then
+	print_help
+	exit 0
+fi
+
+if [ $1 == 'status' ]; then
+	if [ $2 == 'all' ] ;then
+		for i in 11 12 21 22 ; do
+			check_status 'ACME' $i
+		done
+		for i in 11 12 21 22 ; do
+			check_status 'PEP' $i
+		done
+		for i in 1 2 ; do 
+			check_status 'RLC' $i
+		done
+		for i in 1 2 ; do 
+			check_status 'ETHMUX' $i
+		done
+	else
+		check_status $2 $3
+	fi
+
+elif [ $1 == 'down' ]; then
+	set_itf_down $2 $3 $4
+
+elif [ $1 == 'up' ]; then
+	set_itf_up $2 $3 $4
+
+else
+	print_help
+fi
+
+
+exit 0
+
+
