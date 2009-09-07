@@ -11,14 +11,13 @@
 
 
 
-#define C_ACSS_MAC_SIZE                      6
 #define C_ACSS_CHANNEL_MAX                   5
 #define C_MAX_CARRIER_TYPE                   15
 #define C_NB_CSC_CARRIER                     4
 #define C_ACSS_PID_MAX                       3
 #define C_ACSS_PVC_MAX                       4
 
-#define NB_ST                                8000
+#define C_MAX_ST 16000
 
 struct st_status {
 	int val;
@@ -65,7 +64,7 @@ typedef struct {
 typedef struct {
 	u_int32_t             ACSS_Reference;
 	u_int32_t             RLSS_Reference;
-	u_int8_t              mac_address[C_ACSS_MAC_SIZE];
+	u_int8_t              mac_address[8];
 	u_int32_t             flu_id;
 	u_int32_t             trunk_id;
 	T_ACSS_ST_TYPE         st_type;
@@ -93,6 +92,9 @@ typedef struct {
 	T_ACSS_ST_PROFILE_ELT  content;
 } __attribute__ ((packed)) T_ACSS_ST_PROFILE_FILE_ELT;
 
+typedef struct {
+	T_ACSS_ST_PROFILE_FILE_ELT      st[C_MAX_ST];
+} __attribute__ ((packed))  T_ACSS_ST_PROFILE_FILE;
 
 
 int main() {
@@ -100,6 +102,10 @@ int main() {
 	char path[128] = "acss_st_profile.bin";
 	struct stat buf;
 
+	printf("T_ACSS_ST_PROFILE_FILE : %d bytes\n", sizeof(T_ACSS_ST_PROFILE_FILE));
+	printf("T_ACSS_ST_PROFILE_FILE_ELT : %d bytes\n", sizeof(T_ACSS_ST_PROFILE_FILE_ELT));
+	printf("T_ACSS_ST_PROFILE_ELT : %d bytes\n", sizeof(T_ACSS_ST_PROFILE_ELT));
+	printf("C_MAX_ST : %d\n", C_MAX_ST);
 	/* stats */
 	ret = stat(path, &buf);
 	if (ret == -1) {
@@ -108,9 +114,9 @@ int main() {
 	}
 
 	int file_size = (int) buf.st_size;
-	int total_size = sizeof(T_ACSS_ST_PROFILE_FILE_ELT) * NB_ST;
+	int total_size = sizeof(T_ACSS_ST_PROFILE_FILE_ELT) * C_MAX_ST;
 	if (file_size != total_size) {
-		printf("incorrect file size: %d != %d (%d x %d)\n", file_size, total_size, sizeof(T_ACSS_ST_PROFILE_FILE_ELT), NB_ST);
+		printf("incorrect file size: %d != %d (%d x %d)\n", file_size, total_size, sizeof(T_ACSS_ST_PROFILE_FILE_ELT), C_MAX_ST);
 		return EXIT_FAILURE;
 	}
 
@@ -121,8 +127,8 @@ int main() {
 		return EXIT_FAILURE;
 	}
 
-	T_ACSS_ST_PROFILE_FILE_ELT *bin_file;
-	bin_file = (T_ACSS_ST_PROFILE_FILE_ELT *)mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	T_ACSS_ST_PROFILE_FILE *bin_file;
+	bin_file = (T_ACSS_ST_PROFILE_FILE *)mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (bin_file == MAP_FAILED) {
 		printf("mmap failed: %s",  strerror(errno));
 		return EXIT_FAILURE;
@@ -130,18 +136,48 @@ int main() {
 
 	/* read */
 	int i = 0;
-	for(i = 0; i < NB_ST; i++) {
-		if (bin_file[i].validity_logged == -1) {
+	for(i = 0; i < C_MAX_ST; i++) {
+		if (bin_file->st[i].validity_logged == -1) {
 			continue;
 		}
-
-		if (bin_file[i].terminal_status < 0 || bin_file[i].terminal_status > 2) {
-		       printf("Invalid terminal status (%u) for ST%d\n",bin_file[i].terminal_status, i);	
+		if (ntohl(bin_file->st[i].validity_logged) != 1) {
+		       printf("Invalid validity (%u) for ST%d\n",bin_file->st[i].validity_logged, i);	
 		       return EXIT_FAILURE;
 		}
 
-		printf("Terminal %i is %s\n", i, st_status[bin_file[i].terminal_status].name);
-		T_ACSS_ST_PROFILE_ELT *c = &bin_file[i].content;
+
+		if (ntohl(bin_file->st[i].terminal_status) < 0 || ntohl(bin_file->st[i].terminal_status) > 2) {
+		       printf("Invalid terminal status (%u) for ST%d\n",bin_file->st[i].terminal_status, i);	
+		       return EXIT_FAILURE;
+		}
+
+		printf("*********************************\n");
+		printf("Terminal %i status is %d\n", i, ntohl(bin_file->st[i].terminal_status));
+		T_ACSS_ST_PROFILE_ELT *c = &bin_file->st[i].content;
+		printf("ACSS ref.: %u\n", ntohl(c->ACSS_Reference));
+		printf("RLSS ref.: %u\n", ntohl(c->RLSS_Reference));
+		printf("MAC address: %.2x.%.2x.%.2x.%.2x.%.2x.%.2x\n",
+			c->mac_address[2],
+			c->mac_address[3],
+			c->mac_address[4],
+			c->mac_address[5],
+			c->mac_address[6],
+			c->mac_address[7]);
+		printf("FLU id.: %u\n", ntohl(c->flu_id));
+		printf("Trunk id.: %u\n", ntohl(c->trunk_id));
+		printf("CRA: %u\n", ntohl(c->cra));
+		printf("BDC: %u\n", ntohl(c->bdc));
+		printf("Channel Nb: %d\n", ntohl(c->channel_number));
+		int i = 0;
+		for (i = 0; i < ntohl(c->channel_number); i++) {
+			printf("Channel Id: %d\n", ntohl(c->channel_desc[i].channel_id));
+			printf("max_rbdc: %d\n", ntohl(c->channel_desc[i].max_rbdc));
+			printf("max_avbdc: %d\n", ntohl(c->channel_desc[i].max_avbdc));
+		}
+		printf("PDR return: %u\n", ntohl(c->pdr_rtn));
+		printf("RBDC timeout: %u\n", ntohl(c->rbdc_timeout));
+		printf("VBC Timeout: %u\n", ntohl(c->vbdc_timeout));
+		printf("FCA : %u\n", ntohl(c->fca));
 	}
 
 
